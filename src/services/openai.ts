@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 // In a real application, you would use environment variables for the API key
 // For this demo, we'll just simulate the API call
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'your-api-key-here', // Replace with your actual API key
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY || 'your-api-key-here', // Replace with your actual API key
   dangerouslyAllowBrowser: true // Only for demo purposes, not recommended for production
 });
 
