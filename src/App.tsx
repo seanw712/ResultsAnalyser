@@ -3,8 +3,8 @@ import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import { analyzeBloodwork } from './services/openai';
 
-// Set worker path manually instead of importing the worker entry
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+// Set worker path for version 4.10.38
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.js';
 
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
