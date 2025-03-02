@@ -67,8 +67,9 @@ export const structureTableData = async (ocrText: string): Promise<any> => {
             "test_name": "Cortisol ochtend",
             "result_current": 16.8,
             "result_previous": 12.6,
-            "reference_range": "4.3 - 22.4",
-            "unit": "g/dL"
+            "reference_range_lower_value": "4.3",
+            "reference_range_upper_value": "22.4",
+            "unit": "g/dL",
             "comment": "Risico indicatie bij hoge waardes"
           }
           Follow these guidelines:

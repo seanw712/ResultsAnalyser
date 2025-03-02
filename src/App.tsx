@@ -65,11 +65,21 @@ const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
+  
+  // Text content for each stage
   const [extractedText, setExtractedText] = useState('');
+  const [jsonText, setJsonText] = useState('');
   const [structuredData, setStructuredData] = useState<Record<string, any>[]>([]);
-  const [analysis, setAnalysis] = useState('');
+  const [analysisText, setAnalysisText] = useState('');
+  
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Processing flags for each section
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [isJsonProcessing, setIsJsonProcessing] = useState(false);
+  const [isTabularProcessing, setIsTabularProcessing] = useState(false);
+  const [isAnalysisProcessing, setIsAnalysisProcessing] = useState(false);
 
   useEffect(() => {
     // Add console log on component mount to verify it's loading
@@ -206,13 +216,16 @@ const App: React.FC = () => {
     return result.data.text;
   };
 
-  const processFile = async () => {
-    if (!file) return;
+  // OCR process - starting from file upload
+  const handleOcr = async () => {
+    if (!file) {
+      setError('Please upload a file first');
+      return;
+    }
 
-    setIsProcessing(true);
-    setProcessingStatus('Starting processing...');
+    setIsOcrProcessing(true);
     setError(null);
-    setStructuredData([]);
+    setProcessingStatus('Starting OCR processing...');
     
     try {
       let text = '';
@@ -227,10 +240,28 @@ const App: React.FC = () => {
       }
       
       setExtractedText(text);
-      
-      // Convert OCR text to structured JSON
-      setProcessingStatus('Converting text to structured format...');
-      const jsonData = await structureTableData(text);
+    } catch (error) {
+      console.error('Error processing file:', error);
+      setError(error instanceof Error ? error.message : 'Error processing file. Please try again.');
+    } finally {
+      setIsOcrProcessing(false);
+      setProcessingStatus('');
+    }
+  };
+
+  // Convert OCR to JSON
+  const handleOcrToJson = async () => {
+    if (!extractedText.trim()) {
+      setError('No OCR text to convert');
+      return;
+    }
+
+    setIsJsonProcessing(true);
+    setError(null);
+    setProcessingStatus('Converting text to structured format...');
+    
+    try {
+      const jsonData = await structureTableData(extractedText);
       
       if (jsonData.error) {
         throw new Error(jsonData.message || 'Failed to structure the data');
@@ -238,92 +269,351 @@ const App: React.FC = () => {
       
       // Assuming the structureTableData returns an object with a data array
       const tableData = Array.isArray(jsonData.data) ? jsonData.data : [jsonData];
+      setJsonText(JSON.stringify(tableData, null, 2));
       setStructuredData(tableData);
-      
-      // Use the structured data for analysis
-      setProcessingStatus('Analyzing data...');
-      const analysisResult = await analyzeBloodwork(JSON.stringify(tableData));
-      setAnalysis(analysisResult);
     } catch (error) {
-      console.error('Error processing file:', error);
-      setError(error instanceof Error ? error.message : 'Error processing file. Please try again.');
+      console.error('Error converting to JSON:', error);
+      setError(error instanceof Error ? error.message : 'Error converting to JSON. Please try again.');
     } finally {
-      setIsProcessing(false);
+      setIsJsonProcessing(false);
       setProcessingStatus('');
     }
   };
 
+  // Convert OCR directly to Tabular (via JSON)
+  const handleOcrToTabular = async () => {
+    if (!extractedText.trim()) {
+      setError('No OCR text to convert');
+      return;
+    }
+
+    setIsTabularProcessing(true);
+    setError(null);
+    setProcessingStatus('Converting text to tabular format...');
+    
+    try {
+      const jsonData = await structureTableData(extractedText);
+      
+      if (jsonData.error) {
+        throw new Error(jsonData.message || 'Failed to structure the data');
+      }
+      
+      // Assuming the structureTableData returns an object with a data array
+      const tableData = Array.isArray(jsonData.data) ? jsonData.data : [jsonData];
+      setJsonText(JSON.stringify(tableData, null, 2));
+      setStructuredData(tableData);
+    } catch (error) {
+      console.error('Error converting to tabular format:', error);
+      setError(error instanceof Error ? error.message : 'Error converting to tabular format. Please try again.');
+    } finally {
+      setIsTabularProcessing(false);
+      setProcessingStatus('');
+    }
+  };
+
+  // Convert OCR directly to Analysis (via JSON and Tabular)
+  const handleOcrToAnalysis = async () => {
+    if (!extractedText.trim()) {
+      setError('No OCR text to analyze');
+      return;
+    }
+
+    setIsAnalysisProcessing(true);
+    setError(null);
+    setProcessingStatus('Processing for analysis...');
+    
+    try {
+      // First convert to JSON
+      const jsonData = await structureTableData(extractedText);
+      
+      if (jsonData.error) {
+        throw new Error(jsonData.message || 'Failed to structure the data');
+      }
+      
+      // Set JSON data
+      const tableData = Array.isArray(jsonData.data) ? jsonData.data : [jsonData];
+      setJsonText(JSON.stringify(tableData, null, 2));
+      setStructuredData(tableData);
+      
+      // Then analyze
+      setProcessingStatus('Analyzing data...');
+      const analysisResult = await analyzeBloodwork(JSON.stringify(tableData));
+      setAnalysisText(analysisResult);
+    } catch (error) {
+      console.error('Error analyzing from OCR:', error);
+      setError(error instanceof Error ? error.message : 'Error analyzing from OCR. Please try again.');
+    } finally {
+      setIsAnalysisProcessing(false);
+      setProcessingStatus('');
+    }
+  };
+
+  // Convert JSON to Tabular
+  const handleJsonToTabular = async () => {
+    if (!jsonText.trim()) {
+      setError('No JSON to convert');
+      return;
+    }
+
+    setIsTabularProcessing(true);
+    setError(null);
+    
+    try {
+      // Parse the JSON
+      const parsed = JSON.parse(jsonText);
+      if (Array.isArray(parsed)) {
+        setStructuredData(parsed);
+      } else {
+        throw new Error('Invalid JSON format - expected an array');
+      }
+    } catch (error) {
+      console.error('Error converting JSON to tabular:', error);
+      setError(error instanceof Error ? error.message : 'Error converting JSON to tabular. Please check JSON format.');
+    } finally {
+      setIsTabularProcessing(false);
+    }
+  };
+
+  // Analyze from JSON
+  const handleJsonToAnalysis = async () => {
+    if (!jsonText.trim()) {
+      setError('No JSON to analyze');
+      return;
+    }
+
+    setIsAnalysisProcessing(true);
+    setError(null);
+    setProcessingStatus('Analyzing data...');
+    
+    try {
+      // Parse the JSON first
+      const parsed = JSON.parse(jsonText);
+      if (Array.isArray(parsed)) {
+        setStructuredData(parsed);
+        
+        // Then analyze
+        const analysisResult = await analyzeBloodwork(jsonText);
+        setAnalysisText(analysisResult);
+      } else {
+        throw new Error('Invalid JSON format - expected an array');
+      }
+    } catch (error) {
+      console.error('Error analyzing from JSON:', error);
+      setError(error instanceof Error ? error.message : 'Error analyzing from JSON. Please check JSON format.');
+    } finally {
+      setIsAnalysisProcessing(false);
+      setProcessingStatus('');
+    }
+  };
+
+  // Analyze from Tabular
+  const handleTabularToAnalysis = async () => {
+    if (structuredData.length === 0) {
+      setError('No tabular data to analyze');
+      return;
+    }
+
+    setIsAnalysisProcessing(true);
+    setError(null);
+    setProcessingStatus('Analyzing data...');
+    
+    try {
+      const analysisResult = await analyzeBloodwork(JSON.stringify(structuredData));
+      setAnalysisText(analysisResult);
+    } catch (error) {
+      console.error('Error analyzing from tabular:', error);
+      setError(error instanceof Error ? error.message : 'Error analyzing from tabular. Please try again.');
+    } finally {
+      setIsAnalysisProcessing(false);
+      setProcessingStatus('');
+    }
+  };
+
+  // Handle OCR text changes
+  const handleOcrTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setExtractedText(e.target.value);
+  };
+
+  // Handle JSON text changes
+  const handleJsonTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setJsonText(e.target.value);
+    // We don't parse JSON here because it might be invalid during editing
+  };
+
+  // Handle analysis text changes
+  const handleAnalysisTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setAnalysisText(e.target.value);
+  };
+
+  // Section component for consistent styling
+  const Section = ({ 
+    title, 
+    children, 
+    buttons 
+  }: { 
+    title: string; 
+    children: React.ReactNode; 
+    buttons?: React.ReactNode 
+  }) => (
+    <div className="mb-10 bg-white rounded-lg shadow-md p-6">
+      <h2 className="text-xl font-semibold mb-4">{title}</h2>
+      {children}
+      {buttons && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          {buttons}
+        </div>
+      )}
+    </div>
+  );
+
+  // Button component for consistent styling
+  const Button = ({ 
+    onClick, 
+    disabled, 
+    children 
+  }: { 
+    onClick: () => void; 
+    disabled?: boolean; 
+    children: React.ReactNode 
+  }) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`px-4 py-2 rounded-md text-white font-medium ${
+        disabled
+          ? 'bg-gray-400 cursor-not-allowed'
+          : 'bg-blue-600 hover:bg-blue-700'
+      }`}
+    >
+      {children}
+    </button>
+  );
+
   return (
     <div className="min-h-screen bg-gray-100 p-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h1 className="text-2xl font-bold text-center mb-6">Blood Work Analysis</h1>
-          
-          <div className="mb-6">
-            <label className="block text-gray-700 mb-2">Upload Lab Results (PDF or Image)</label>
-            <div className="flex items-center">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept="application/pdf,image/*"
-                className="block w-full text-sm text-gray-500
-                  file:mr-4 file:py-2 file:px-4
-                  file:rounded-full file:border-0
-                  file:text-sm file:font-semibold
-                  file:bg-blue-50 file:text-blue-700
-                  hover:file:bg-blue-100"
-              />
-              <button
-                onClick={processFile}
-                disabled={!file || isProcessing}
-                className={`ml-4 px-4 py-2 rounded-md text-white font-medium ${
-                  !file || isProcessing
-                    ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                {isProcessing ? 'Processing...' : 'Process'}
-              </button>
-            </div>
+      <div className="max-w-5xl mx-auto">
+        {/* File Upload Section */}
+        <Section title="Upload Lab Results">
+          <div className="mb-4">
+            <label className="block text-gray-700 mb-2">Select PDF or Image File</label>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="application/pdf,image/*"
+              className="block w-full text-sm text-gray-500
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-full file:border-0
+                file:text-sm file:font-semibold
+                file:bg-blue-50 file:text-blue-700
+                hover:file:bg-blue-100"
+            />
           </div>
+          <Button onClick={handleOcr} disabled={!file || isOcrProcessing}>
+            {isOcrProcessing ? 'Processing...' : 'OCR'}
+          </Button>
+        </Section>
 
-          {isProcessing && (
-            <div className="mb-6">
-              <div className="animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+        {/* Processing Status */}
+        {processingStatus && (
+          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-md p-4">
+            <p className="text-blue-700">
+              <span className="animate-pulse inline-block h-2 w-2 rounded-full bg-blue-600 mr-2"></span>
+              {processingStatus}
+            </p>
+          </div>
+        )}
+
+        {/* Error Display */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+            <p className="text-red-600">{error}</p>
+          </div>
+        )}
+
+        {/* OCR Results Section */}
+        <Section 
+          title="OCR Results" 
+          buttons={
+            <>
+              <Button onClick={handleOcrToJson} disabled={!extractedText || isJsonProcessing}>
+                Convert to JSON
+              </Button>
+              <Button onClick={handleOcrToTabular} disabled={!extractedText || isTabularProcessing}>
+                Convert to Tabular Format
+              </Button>
+              <Button onClick={handleOcrToAnalysis} disabled={!extractedText || isAnalysisProcessing}>
+                Analyze Results
+              </Button>
+            </>
+          }
+        >
+          <textarea
+            value={extractedText}
+            onChange={handleOcrTextChange}
+            className="bg-gray-50 p-4 rounded-md h-[300px] w-full resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+            placeholder="OCR results will appear here..."
+            spellCheck="false"
+          />
+        </Section>
+
+        {/* JSON Results Section */}
+        <Section 
+          title="JSON Data" 
+          buttons={
+            <>
+              <Button onClick={handleJsonToTabular} disabled={!jsonText || isTabularProcessing}>
+                Convert to Tabular Format
+              </Button>
+              <Button onClick={handleJsonToAnalysis} disabled={!jsonText || isAnalysisProcessing}>
+                Analyze Results
+              </Button>
+            </>
+          }
+        >
+          <textarea
+            value={jsonText}
+            onChange={handleJsonTextChange}
+            className="bg-gray-50 p-4 rounded-md h-[300px] w-full font-mono text-sm resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+            placeholder="JSON data will appear here..."
+            spellCheck="false"
+          />
+        </Section>
+
+        {/* Tabular Results Section */}
+        <Section 
+          title="Tabular Format" 
+          buttons={
+            <Button onClick={handleTabularToAnalysis} disabled={structuredData.length === 0 || isAnalysisProcessing}>
+              Analyze Results
+            </Button>
+          }
+        >
+          <div className="h-[400px] overflow-y-auto border border-gray-200 rounded-md">
+            {structuredData.length > 0 ? (
+              <DataTable 
+                data={structuredData} 
+                title="Blood Work Results" 
+                className="w-full"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                Tabular data will appear here...
               </div>
-              <p className="text-sm text-gray-600 mt-2">{processingStatus}</p>
-            </div>
-          )}
+            )}
+          </div>
+        </Section>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-red-600">{error}</p>
-            </div>
-          )}
-
-          {structuredData.length > 0 && (
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold mb-4">Extracted Data</h2>
-              <div className="bg-gray-50 p-4 rounded-md overflow-x-auto">
-                <pre className="whitespace-pre-wrap text-sm font-mono">
-                  {JSON.stringify(structuredData, null, 2)}
-                </pre>
-              </div>
-            </div>
-          )}
-
-          {analysis && (
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold mb-4">Analysis Results</h2>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <pre className="whitespace-pre-wrap text-sm">{analysis}</pre>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Analysis Results Section */}
+        <Section title="Lab Analysis">
+          <textarea
+            value={analysisText}
+            onChange={handleAnalysisTextChange}
+            className="bg-gray-50 p-4 rounded-md h-[300px] w-full resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+            placeholder="Analysis results will appear here..."
+            spellCheck="false"
+          />
+        </Section>
       </div>
     </div>
   );
