@@ -1,21 +1,32 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import { analyzeBloodwork } from './services/openai';
 
-// Set worker path for version 4.10.38
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.js';
+// Set the worker source path - updated to use the correct URL
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('/pdf.worker.min.mjs', window.location.origin).href;
 
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedText, setExtractedText] = useState('');
   const [analysis, setAnalysis] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Add console log on component mount to verify it's loading
+    console.log('App component mounted');
+    
+    // Verify that Tesseract and pdfjsLib are loaded correctly
+    console.log('Tesseract available:', !!Tesseract);
+    console.log('PDF.js available:', !!pdfjsLib);
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
+      console.log('File selected:', selectedFile.name, selectedFile.type);
       if (selectedFile.type === 'application/pdf' || selectedFile.type.startsWith('image/')) {
         setFile(selectedFile);
       } else {
@@ -28,18 +39,38 @@ const App: React.FC = () => {
   };
 
   const extractTextFromPdf = async (pdfFile: File): Promise<string> => {
-    const arrayBuffer = await pdfFile.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let fullText = '';
+    try {
+      const arrayBuffer = await pdfFile.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      
+      // Add timeout handling
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('PDF loading timed out')), 30000); // 30 seconds timeout
+      });
+      
+      const pdf = await Promise.race([loadingTask.promise, timeoutPromise]);
+      let fullText = '';
 
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const textItems = textContent.items.map((item: any) => item.str).join(' ');
-      fullText += textItems + '\n';
+      console.log(`PDF loaded successfully with ${pdf.numPages} pages`);
+      
+      for (let i = 1; i <= pdf.numPages; i++) {
+        console.log(`Processing page ${i}`);
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const textItems = textContent.items.map((item: any) => item.str).join(' ');
+        fullText += textItems + '\n';
+      }
+
+      if (!fullText.trim()) {
+        console.warn('PDF was processed but no text was extracted');
+        return 'No text content was found in the PDF. The document might be scanned or contain only images.';
+      }
+
+      return fullText;
+    } catch (error) {
+      console.error('Error extracting text from PDF:', error);
+      throw new Error('Failed to extract text from PDF. Please make sure the file is not corrupted and try again.');
     }
-
-    return fullText;
   };
 
   const extractTextFromImage = async (imageFile: File): Promise<string> => {
@@ -51,12 +82,18 @@ const App: React.FC = () => {
     if (!file) return;
 
     setIsProcessing(true);
+    setError(null);
+    
     try {
       let text = '';
       if (file.type === 'application/pdf') {
         text = await extractTextFromPdf(file);
       } else if (file.type.startsWith('image/')) {
         text = await extractTextFromImage(file);
+      }
+      
+      if (!text.trim()) {
+        throw new Error('No text was extracted from the file');
       }
       
       setExtractedText(text);
@@ -66,7 +103,7 @@ const App: React.FC = () => {
       setAnalysis(analysisResult);
     } catch (error) {
       console.error('Error processing file:', error);
-      alert('Error processing file. Please try again.');
+      setError(error instanceof Error ? error.message : 'Error processing file. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -108,6 +145,12 @@ const App: React.FC = () => {
             {file && (
               <p className="mt-2 text-sm text-gray-600">
                 Selected file: {file.name}
+              </p>
+            )}
+
+            {error && (
+              <p className="mt-2 text-sm text-red-600">
+                Error: {error}
               </p>
             )}
           </div>

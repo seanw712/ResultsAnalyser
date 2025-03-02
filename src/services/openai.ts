@@ -1,14 +1,23 @@
 import OpenAI from 'openai';
 
-// In a real application, you would use environment variables for the API key
-// For this demo, we'll just simulate the API call
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY || 'your-api-key-here', // Replace with your actual API key
-  dangerouslyAllowBrowser: true // Only for demo purposes, not recommended for production
-});
+const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+
+// Create OpenAI instance only if API key is available
+const openai = apiKey 
+  ? new OpenAI({
+      apiKey,
+      dangerouslyAllowBrowser: true // Only for demo purposes, not recommended for production
+    })
+  : null;
 
 export const analyzeBloodwork = async (text: string): Promise<string> => {
   try {
+    // Check if OpenAI instance is available
+    if (!openai) {
+      console.warn('OpenAI API key not found. Providing mock analysis.');
+      return 'API key not configured. This is a mock analysis response.\n\nPlease set up your VITE_OPENAI_API_KEY in the .env file to receive real analysis.';
+    }
+    
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       store: true,
@@ -27,7 +36,7 @@ export const analyzeBloodwork = async (text: string): Promise<string> => {
     return completion.choices[0].message.content || 'No analysis available';
   } catch (error) {
     console.error('Error analyzing blood work:', error);
-    throw new Error('Unable to analyze blood work results. Please check the data and try again.');
+    return 'Error: Unable to analyze blood work results. Please check your API key and network connection.';
   }
 };
 
