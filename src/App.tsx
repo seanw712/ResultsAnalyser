@@ -3,12 +3,68 @@ import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import { analyzeBloodwork } from './services/openai';
 
-// Set the worker source path - updated to use the correct URL
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('/pdf.worker.min.mjs', window.location.origin).href;
+// Set the worker source path
+pdfjsLib.GlobalWorkerOptions.workerSrc = `${window.location.origin}/pdf.worker.min.mjs`;
+
+// Utility to optimize image for OCR
+const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
+  // Create a temporary canvas for image processing
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d')!;
+  
+  // Set dimensions (optionally resize for very large images)
+  const maxDimension = 2000; // Reasonable upper limit for OCR
+  let width = canvas.width;
+  let height = canvas.height;
+  
+  if (width > maxDimension || height > maxDimension) {
+    if (width > height) {
+      height = Math.round(height * (maxDimension / width));
+      width = maxDimension;
+    } else {
+      width = Math.round(width * (maxDimension / height));
+      height = maxDimension;
+    }
+  }
+  
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  
+  // Draw the image with optional resizing
+  tempCtx.drawImage(canvas, 0, 0, width, height);
+  
+  // Apply preprocessing to improve OCR
+  try {
+    // Get the image data
+    const imageData = tempCtx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    
+    // Simple contrast enhancement and binarization
+    for (let i = 0; i < data.length; i += 4) {
+      // Convert to grayscale
+      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      
+      // Threshold to increase contrast (adjust the 127 value as needed)
+      const value = gray > 127 ? 255 : 0;
+      
+      // Set RGB channels to the same value for black/white effect
+      data[i] = data[i + 1] = data[i + 2] = value;
+    }
+    
+    // Put the modified pixels back
+    tempCtx.putImageData(imageData, 0, 0);
+  } catch (err) {
+    console.warn('Image optimization failed, proceeding with unoptimized image', err);
+  }
+  
+  // Return as data URL
+  return tempCanvas.toDataURL('image/png');
+};
 
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
   const [extractedText, setExtractedText] = useState('');
   const [analysis, setAnalysis] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +96,7 @@ const App: React.FC = () => {
 
   const extractTextFromPdf = async (pdfFile: File): Promise<string> => {
     try {
+      setProcessingStatus('Loading PDF document...');
       const arrayBuffer = await pdfFile.arrayBuffer();
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       
@@ -52,18 +109,76 @@ const App: React.FC = () => {
       let fullText = '';
 
       console.log(`PDF loaded successfully with ${pdf.numPages} pages`);
+      setProcessingStatus(`Extracting text from ${pdf.numPages} pages...`);
       
+      // First try to extract text directly
       for (let i = 1; i <= pdf.numPages; i++) {
-        console.log(`Processing page ${i}`);
+        console.log(`Processing page ${i} for text extraction`);
+        setProcessingStatus(`Extracting text from page ${i} of ${pdf.numPages}...`);
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         const textItems = textContent.items.map((item: any) => item.str).join(' ');
         fullText += textItems + '\n';
       }
 
+      // Check if meaningful text was extracted
+      if (!fullText.trim() || fullText.trim().length < 50) {
+        console.log('PDF has minimal or no text content. Attempting OCR on rendered pages...');
+        setProcessingStatus('PDF appears to be scanned. Performing OCR (this may take a while)...');
+        
+        // If minimal text was found, try OCR on rendered pages
+        fullText = ''; // Reset the text
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+          console.log(`Processing page ${i} for OCR`);
+          setProcessingStatus(`Performing OCR on page ${i} of ${pdf.numPages} (this may take a while)...`);
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 1.5 }); // Higher scale for better OCR
+          
+          // Create a canvas element to render the PDF page
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d')!;
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          
+          // Render the page
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport
+          };
+          
+          await page.render(renderContext).promise;
+          
+          // Optimize image for better OCR results
+          const imageData = optimizeImageForOCR(canvas);
+          
+          // Perform OCR on the rendered page
+          console.log(`Performing OCR on page ${i}`);
+          const result = await Tesseract.recognize(
+            imageData,
+            'eng',
+            {
+              logger: progress => {
+                if (progress.status === 'recognizing text') {
+                  setProcessingStatus(`OCR on page ${i}: ${Math.round(progress.progress * 100)}% complete...`);
+                }
+              }
+            }
+          );
+          fullText += result.data.text + '\n';
+          
+          // Clean up to avoid memory leaks
+          canvas.width = 0;
+          canvas.height = 0;
+          
+          // Add a small delay to allow for garbage collection
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
       if (!fullText.trim()) {
-        console.warn('PDF was processed but no text was extracted');
-        return 'No text content was found in the PDF. The document might be scanned or contain only images.';
+        console.warn('PDF was processed but no text was extracted, even after OCR attempt');
+        return 'No text content was found in the PDF, even after trying OCR. The document might be corrupted or contain unsupported content.';
       }
 
       return fullText;
@@ -74,7 +189,18 @@ const App: React.FC = () => {
   };
 
   const extractTextFromImage = async (imageFile: File): Promise<string> => {
-    const result = await Tesseract.recognize(imageFile, 'eng');
+    setProcessingStatus('Performing OCR on image (this may take a while)...');
+    const result = await Tesseract.recognize(
+      imageFile, 
+      'eng',
+      {
+        logger: progress => {
+          if (progress.status === 'recognizing text') {
+            setProcessingStatus(`OCR progress: ${Math.round(progress.progress * 100)}% complete...`);
+          }
+        }
+      }
+    );
     return result.data.text;
   };
 
@@ -82,6 +208,7 @@ const App: React.FC = () => {
     if (!file) return;
 
     setIsProcessing(true);
+    setProcessingStatus('Starting processing...');
     setError(null);
     
     try {
@@ -99,6 +226,7 @@ const App: React.FC = () => {
       setExtractedText(text);
       
       // Use our OpenAI service to analyze the text
+      setProcessingStatus('Analyzing extracted text...');
       const analysisResult = await analyzeBloodwork(text);
       setAnalysis(analysisResult);
     } catch (error) {
@@ -106,6 +234,7 @@ const App: React.FC = () => {
       setError(error instanceof Error ? error.message : 'Error processing file. Please try again.');
     } finally {
       setIsProcessing(false);
+      setProcessingStatus('');
     }
   };
 
@@ -146,6 +275,15 @@ const App: React.FC = () => {
               <p className="mt-2 text-sm text-gray-600">
                 Selected file: {file.name}
               </p>
+            )}
+
+            {isProcessing && processingStatus && (
+              <div className="mt-4">
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div className="bg-blue-600 h-2.5 rounded-full animate-pulse"></div>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">{processingStatus}</p>
+              </div>
             )}
 
             {error && (
