@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
-import { analyzeBloodwork } from './services/openai';
+import { analyzeBloodwork, structureTableData } from './services/openai';
+import DataTable from './components/DataTable';
 
 // Set the worker source path
 pdfjsLib.GlobalWorkerOptions.workerSrc = `${window.location.origin}/pdf.worker.min.mjs`;
@@ -66,6 +67,7 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [extractedText, setExtractedText] = useState('');
+  const [structuredData, setStructuredData] = useState<Record<string, any>[]>([]);
   const [analysis, setAnalysis] = useState('');
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -210,6 +212,7 @@ const App: React.FC = () => {
     setIsProcessing(true);
     setProcessingStatus('Starting processing...');
     setError(null);
+    setStructuredData([]);
     
     try {
       let text = '';
@@ -225,9 +228,21 @@ const App: React.FC = () => {
       
       setExtractedText(text);
       
-      // Use our OpenAI service to analyze the text
-      setProcessingStatus('Analyzing extracted text...');
-      const analysisResult = await analyzeBloodwork(text);
+      // Convert OCR text to structured JSON
+      setProcessingStatus('Converting text to structured format...');
+      const jsonData = await structureTableData(text);
+      
+      if (jsonData.error) {
+        throw new Error(jsonData.message || 'Failed to structure the data');
+      }
+      
+      // Assuming the structureTableData returns an object with a data array
+      const tableData = Array.isArray(jsonData.data) ? jsonData.data : [jsonData];
+      setStructuredData(tableData);
+      
+      // Use the structured data for analysis
+      setProcessingStatus('Analyzing data...');
+      const analysisResult = await analyzeBloodwork(JSON.stringify(tableData));
       setAnalysis(analysisResult);
     } catch (error) {
       console.error('Error processing file:', error);
@@ -240,7 +255,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-100 p-4">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-lg shadow-md p-6">
           <h1 className="text-2xl font-bold text-center mb-6">Blood Work Analysis</h1>
           
@@ -251,10 +266,10 @@ const App: React.FC = () => {
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept=".pdf,image/jpeg,image/png"
+                accept="application/pdf,image/*"
                 className="block w-full text-sm text-gray-500
                   file:mr-4 file:py-2 file:px-4
-                  file:rounded-md file:border-0
+                  file:rounded-full file:border-0
                   file:text-sm file:font-semibold
                   file:bg-blue-50 file:text-blue-700
                   hover:file:bg-blue-100"
@@ -268,52 +283,44 @@ const App: React.FC = () => {
                     : 'bg-blue-600 hover:bg-blue-700'
                 }`}
               >
-                {isProcessing ? 'Processing...' : 'Analyze'}
+                {isProcessing ? 'Processing...' : 'Process'}
               </button>
             </div>
-            {file && (
-              <p className="mt-2 text-sm text-gray-600">
-                Selected file: {file.name}
-              </p>
-            )}
-
-            {isProcessing && processingStatus && (
-              <div className="mt-4">
-                <div className="w-full bg-gray-200 rounded-full h-2.5">
-                  <div className="bg-blue-600 h-2.5 rounded-full animate-pulse"></div>
-                </div>
-                <p className="mt-2 text-sm text-gray-600">{processingStatus}</p>
-              </div>
-            )}
-
-            {error && (
-              <p className="mt-2 text-sm text-red-600">
-                Error: {error}
-              </p>
-            )}
           </div>
 
-          {extractedText && (
+          {isProcessing && (
             <div className="mb-6">
-              <h2 className="text-lg font-semibold mb-2">Extracted Text</h2>
-              <div className="border rounded-md p-3 bg-gray-50 h-40 overflow-y-auto">
-                <pre className="text-sm whitespace-pre-wrap">{extractedText}</pre>
+              <div className="animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+              </div>
+              <p className="text-sm text-gray-600 mt-2">{processingStatus}</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-600">{error}</p>
+            </div>
+          )}
+
+          {structuredData.length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold mb-4">Extracted Data</h2>
+              <div className="bg-gray-50 p-4 rounded-md overflow-x-auto">
+                <pre className="whitespace-pre-wrap text-sm font-mono">
+                  {JSON.stringify(structuredData, null, 2)}
+                </pre>
               </div>
             </div>
           )}
 
           {analysis && (
-            <div>
-              <h2 className="text-lg font-semibold mb-2">Analysis Results</h2>
-              <textarea
-                value={analysis}
-                onChange={(e) => setAnalysis(e.target.value)}
-                className="w-full border rounded-md p-3 h-48 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
-                placeholder="Analysis results will appear here..."
-              />
-              <p className="mt-2 text-sm text-gray-500">
-                You can edit this analysis if needed. Always verify results with a healthcare professional.
-              </p>
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold mb-4">Analysis Results</h2>
+              <div className="bg-gray-50 p-4 rounded-md">
+                <pre className="whitespace-pre-wrap text-sm">{analysis}</pre>
+              </div>
             </div>
           )}
         </div>
