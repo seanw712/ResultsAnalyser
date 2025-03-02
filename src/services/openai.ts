@@ -63,17 +63,24 @@ export const structureTableData = async (ocrText: string): Promise<any> => {
         { 
           role: "system", 
           content: `You are an AI assistant that specializes in converting OCR'd table text into structured data.
-          Your task is to interpret the provided OCR text that originated from a table and convert it into a well-structured JSON format.
+          Your task is to interpret the provided OCR text that originated from a table and convert it into a well-structured JSON format. Example:   {
+            "test_name": "Cortisol ochtend",
+            "result_current": 16.8,
+            "result_previous": 12.6,
+            "reference_range": "4.3 - 22.4",
+            "unit": "g/dL"
+            "comment": "Risico indicatie bij hoge waardes"
+          }
           Follow these guidelines:
-          1. Identify column headers and use them as keys in the JSON
-          2. Create an array of objects where each object represents a row in the original table
-          3. Handle any misalignments or OCR errors intelligently
-          4. If the table structure is unclear, create the most logical structure based on the content
+          1. Ensure all values are taken into account, and are in the correct unit (mg/dL, mmol/L, etc.)
+          2. Stick to the example format, do not add any other keys. If you cannot find a value, use null.
+          3. Create an array of objects where each object represents a row in the original table
+          4. Handle any misalignments or OCR errors intelligently and feed possible errors to the user with the tag "ERROR".
           5. Return only valid JSON with no explanations or markdown`
         },
         { 
           role: "user", 
-          content: `Convert this OCR'd table text to structured JSON:\n\n${ocrText}` 
+          content: `Convert this extracted text (OCR) to structured JSON:\n\n${ocrText}` 
         }
       ]
     });

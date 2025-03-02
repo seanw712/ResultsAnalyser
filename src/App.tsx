@@ -13,25 +13,19 @@ const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
   const tempCanvas = document.createElement('canvas');
   const tempCtx = tempCanvas.getContext('2d')!;
   
-  // Set dimensions (optionally resize for very large images)
-  const maxDimension = 2000; // Reasonable upper limit for OCR
-  let width = canvas.width;
-  let height = canvas.height;
-  
-  if (width > maxDimension || height > maxDimension) {
-    if (width > height) {
-      height = Math.round(height * (maxDimension / width));
-      width = maxDimension;
-    } else {
-      width = Math.round(width * (maxDimension / height));
-      height = maxDimension;
-    }
-  }
+  // Increase resolution for better number recognition
+  const scaleFactor = 2.0; // Scale up for better detail
+  const width = canvas.width * scaleFactor;
+  const height = canvas.height * scaleFactor;
   
   tempCanvas.width = width;
   tempCanvas.height = height;
   
-  // Draw the image with optional resizing
+  // Enable image smoothing for better scaling
+  tempCtx.imageSmoothingEnabled = true;
+  tempCtx.imageSmoothingQuality = 'high';
+  
+  // Draw the image with scaling
   tempCtx.drawImage(canvas, 0, 0, width, height);
   
   // Apply preprocessing to improve OCR
@@ -40,15 +34,21 @@ const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
     const imageData = tempCtx.getImageData(0, 0, width, height);
     const data = imageData.data;
     
-    // Simple contrast enhancement and binarization
+    // Enhanced image processing for better number recognition
     for (let i = 0; i < data.length; i += 4) {
-      // Convert to grayscale
-      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      // Convert to grayscale using precise coefficients
+      const gray = 0.2989 * data[i] + 0.5870 * data[i + 1] + 0.1140 * data[i + 2];
       
-      // Threshold to increase contrast (adjust the 127 value as needed)
-      const value = gray > 127 ? 255 : 0;
+      // Enhance contrast
+      const contrast = 1.2; // Subtle contrast enhancement
+      const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+      const enhancedGray = factor * (gray - 128) + 128;
       
-      // Set RGB channels to the same value for black/white effect
+      // Adaptive thresholding
+      const localThreshold = 180; // Slightly higher threshold for numbers
+      const value = enhancedGray > localThreshold ? 255 : 0;
+      
+      // Set all channels to the same value
       data[i] = data[i + 1] = data[i + 2] = value;
     }
     
@@ -58,7 +58,6 @@ const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
     console.warn('Image optimization failed, proceeding with unoptimized image', err);
   }
   
-  // Return as data URL
   return tempCanvas.toDataURL('image/png');
 };
 
@@ -203,6 +202,7 @@ const App: React.FC = () => {
         }
       }
     );
+    
     return result.data.text;
   };
 
