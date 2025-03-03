@@ -455,7 +455,7 @@ const App: React.FC = () => {
     children: React.ReactNode; 
     buttons?: React.ReactNode 
   }) => (
-    <div className="mb-10 bg-white rounded-lg shadow-md p-6">
+    <div className="section">
       <h2 className="text-xl font-semibold mb-4">{title}</h2>
       {children}
       {buttons && (
@@ -491,7 +491,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-100 p-4">
-      <div className="max-w-5xl mx-auto">
+      <div className="container">
         {/* File Upload Section */}
         <Section title="Upload Lab Results">
           <div className="mb-4">
@@ -551,7 +551,7 @@ const App: React.FC = () => {
           <textarea
             value={extractedText}
             onChange={handleOcrTextChange}
-            className="bg-gray-50 p-4 rounded-md h-[300px] w-full resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+            className="bg-gray-50 p-4 rounded-md resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 text-base leading-relaxed"
             placeholder="OCR results will appear here..."
             spellCheck="false"
           />
@@ -574,7 +574,7 @@ const App: React.FC = () => {
           <textarea
             value={jsonText}
             onChange={handleJsonTextChange}
-            className="bg-gray-50 p-4 rounded-md h-[300px] w-full font-mono text-sm resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+            className="bg-gray-50 p-4 rounded-md resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 font-mono text-sm leading-relaxed"
             placeholder="JSON data will appear here..."
             spellCheck="false"
           />
@@ -589,7 +589,7 @@ const App: React.FC = () => {
             </Button>
           }
         >
-          <div className="h-[400px] overflow-y-auto border border-gray-200 rounded-md">
+          <div className="table-container overflow-y-auto border border-gray-200 rounded-md">
             {structuredData.length > 0 ? (
               <DataTable 
                 data={structuredData} 
@@ -609,7 +609,7 @@ const App: React.FC = () => {
           <textarea
             value={analysisText}
             onChange={handleAnalysisTextChange}
-            className="bg-gray-50 p-4 rounded-md h-[300px] w-full resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+            className="bg-gray-50 p-4 rounded-md resize-none border border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 text-base leading-relaxed analysis-textarea"
             placeholder="Analysis results will appear here..."
             spellCheck="false"
           />
