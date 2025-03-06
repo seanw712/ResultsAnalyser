@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { createWorker } from 'tesseract.js';
+import { createWorker, PSM } from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import { analyzeBloodwork, structureTableData } from '../services/openai';
 import { optimizeImageForOCR } from '../utils/imageProcessing';
@@ -67,17 +67,47 @@ export const useOcrProcessing = () => {
 
   // Replace the current transformOcrTextToTable function with this new one
   const transformOcrWordsToTable_BBox = (words: any[]): { structuredData: string[][], htmlTable: string } => {
-    const rowTolerance = 10; // pixels tolerance to group words into the same row
+    const rowTolerance = 30; // Increased tolerance for row grouping
     const rows: { y: number, words: any[] }[] = [];
     
-    words.forEach(word => {
+    // Skip processing if no words
+    if (!words || words.length === 0) {
+      return { structuredData: [], htmlTable: "<table></table>" };
+    }
+    
+    // First, sort all words by their vertical position (top to bottom)
+    const sortedWords = [...words].sort((a, b) => {
+      const midYA = (a.bbox.y0 + a.bbox.y1) / 2;
+      const midYB = (b.bbox.y0 + b.bbox.y1) / 2;
+      return midYA - midYB;
+    });
+    
+    // Find document boundaries
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    
+    sortedWords.forEach(word => {
+      minY = Math.min(minY, word.bbox.y0);
+      maxY = Math.max(maxY, word.bbox.y1);
+      minX = Math.min(minX, word.bbox.x0);
+      maxX = Math.max(maxX, word.bbox.x1);
+    });
+    
+    // Calculate document dimensions
+    const docHeight = maxY - minY;
+    const docWidth = maxX - minX;
+    
+    // Group words into rows with the increased tolerance
+    sortedWords.forEach(word => {
       // Compute the vertical center of the word from its bounding box
       const midY = (word.bbox.y0 + word.bbox.y1) / 2;
       let foundRow = rows.find(r => Math.abs(r.y - midY) < rowTolerance);
       if (foundRow) {
         foundRow.words.push(word);
         // Update the average row y value
-        foundRow.y = (foundRow.y + midY) / 2;
+        foundRow.y = (foundRow.y * foundRow.words.length + midY) / (foundRow.words.length + 1);
       } else {
         rows.push({ y: midY, words: [word] });
       }
@@ -85,10 +115,114 @@ export const useOcrProcessing = () => {
     
     // Sort rows top-to-bottom
     rows.sort((a, b) => a.y - b.y);
+    
+    // Log all rows for debugging
+    console.log('All rows before header detection:', rows.map((row, idx) => ({
+      index: idx,
+      y: row.y,
+      wordCount: row.words.length,
+      text: row.words.map(w => w.text).join(' ')
+    })));
 
+    // Enhanced header detection algorithm
+    const potentialHeaderIndices: number[] = [];
+    
+    // Look for specific header patterns in lab reports
+    // 1. Look for rows with common header terms
+    const headerTerms = ['testen', 'resultaten', 'test', 'result', 'parameter', 'waarde', 'eenheid', 'eenheden', 'onderl', 'bovenl'];
+    
+    // 2. Look for rows that are positioned in the top third of the document
+    const topThirdThreshold = minY + (docHeight / 3);
+    
+    // 3. Look for rows with multiple evenly spaced words (column headers)
+    rows.forEach((row, index) => {
+      // Skip empty rows
+      if (row.words.length === 0) return;
+      
+      // Sort words left-to-right
+      row.words.sort((a, b) => a.bbox.x0 - b.bbox.x0);
+      
+      // Check if this row contains any header terms
+      const rowText = row.words.map(w => w.text.toLowerCase()).join(' ');
+      const containsHeaderTerm = headerTerms.some(term => rowText.includes(term));
+      
+      // Check if row is in the top third of the document
+      const isInTopThird = row.y < topThirdThreshold;
+      
+      // Check if words are distributed across the width (indicating column headers)
+      const leftmostX = row.words[0].bbox.x0;
+      const rightmostX = row.words[row.words.length - 1].bbox.x1;
+      const rowWidth = rightmostX - leftmostX;
+      const rowWidthRatio = rowWidth / docWidth;
+      
+      // Check for even spacing between words
+      let hasEvenSpacing = false;
+      if (row.words.length >= 3) {
+        const gaps = [];
+        for (let i = 1; i < row.words.length; i++) {
+          gaps.push(row.words[i].bbox.x0 - row.words[i-1].bbox.x1);
+        }
+        
+        // Calculate standard deviation of gaps
+        const avgGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+        const stdDev = Math.sqrt(gaps.reduce((sum, gap) => sum + Math.pow(gap - avgGap, 2), 0) / gaps.length);
+        const coeffVar = stdDev / avgGap;
+        
+        // If coefficient of variation is low, spacing is relatively even
+        hasEvenSpacing = coeffVar < 0.7; // Threshold for evenness
+      }
+      
+      // Log detailed info about this row for debugging
+      console.log(`Row ${index} analysis:`, {
+        y: row.y,
+        text: rowText,
+        wordCount: row.words.length,
+        rowWidth,
+        rowWidthRatio,
+        containsHeaderTerm,
+        isInTopThird,
+        hasEvenSpacing
+      });
+      
+      // Determine if this is a header row based on multiple criteria
+      const isHeaderRow = (
+        // Either contains a header term
+        containsHeaderTerm ||
+        // Or meets multiple structural criteria
+        (row.words.length >= 3 && 
+         rowWidthRatio > 0.5 && 
+         isInTopThird && 
+         hasEvenSpacing)
+      );
+      
+      if (isHeaderRow) {
+        potentialHeaderIndices.push(index);
+        console.log(`Row ${index} identified as a header row`);
+      }
+    });
+    
+    // If no headers were found but we have rows, try to identify the first row with multiple columns as a header
+    if (potentialHeaderIndices.length === 0 && rows.length > 1) {
+      // Find the first row with at least 3 words that spans a significant width
+      for (let i = 0; i < Math.min(5, rows.length); i++) {
+        if (rows[i].words.length >= 3) {
+          rows[i].words.sort((a, b) => a.bbox.x0 - b.bbox.x0);
+          const leftmostX = rows[i].words[0].bbox.x0;
+          const rightmostX = rows[i].words[rows[i].words.length - 1].bbox.x1;
+          const rowWidth = rightmostX - leftmostX;
+          
+          if (rowWidth / docWidth > 0.4) {
+            potentialHeaderIndices.push(i);
+            console.log(`Fallback: Row ${i} identified as a header row`);
+            break;
+          }
+        }
+      }
+    }
+    
     // For each row, sort words left-to-right and group into cells by detecting large horizontal gaps
     const gapThreshold = 20; // if the gap between words exceeds 20 pixels, consider it the start of a new cell
-    const structuredRows = rows.map(row => {
+    const structuredRows = rows.map((row, rowIndex) => {
       // sort the words in this row by their x position
       row.words.sort((a, b) => a.bbox.x0 - b.bbox.x0);
       
@@ -132,15 +266,30 @@ export const useOcrProcessing = () => {
 
     // Build the HTML table string
     let html = "<table>";
-    paddedRows.forEach(row => {
-      html += "<tr>";
-      row.forEach(cell => {
-        const content = cell.trim() === "" ? "—" : cell.trim();
-        html += `<td>${content}</td>`;
-      });
+    paddedRows.forEach((row, index) => {
+      // Check if this is a potential header row
+      const isHeader = potentialHeaderIndices.includes(index);
+      
+      if (isHeader) {
+        html += "<tr class='header-row'>";
+        row.forEach(cell => {
+          const content = cell.trim() === "" ? "—" : cell.trim();
+          html += `<th>${content}</th>`;
+        });
+      } else {
+        html += "<tr>";
+        row.forEach(cell => {
+          const content = cell.trim() === "" ? "—" : cell.trim();
+          html += `<td>${content}</td>`;
+        });
+      }
       html += "</tr>";
     });
     html += "</table>";
+    
+    // For debugging
+    console.log('Potential header rows:', potentialHeaderIndices);
+    console.log('Structured rows:', paddedRows);
     
     return { structuredData: paddedRows, htmlTable: html };
   };
@@ -165,6 +314,9 @@ export const useOcrProcessing = () => {
       if (workerRef.current) {
         workerRef.current.setParameters({
           tessedit_ocr_engine_mode: 1, // Use LSTM only
+          tessedit_pageseg_mode: PSM.SINGLE_BLOCK,  // Assume a single uniform block of text
+          preserve_interword_spaces: '1', // Preserve spaces between words
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:+-*/()[]{}=<>%&$#@!?\'"\\ ', // Allow these characters
         });
       }
 
@@ -245,6 +397,9 @@ export const useOcrProcessing = () => {
       if (workerRef.current) {
         workerRef.current.setParameters({
           tessedit_ocr_engine_mode: 1, // Use LSTM only
+          tessedit_pageseg_mode: PSM.SINGLE_BLOCK,  // Assume a single uniform block of text
+          preserve_interword_spaces: '1', // Preserve spaces between words
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:+-*/()[]{}=<>%&$#@!?\'"\\ ', // Allow these characters
         });
         setProcessingStatus('Starting OCR...', 30);
         const result = await workerRef.current.recognize(optimizedDataUrl);
