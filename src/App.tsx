@@ -4,7 +4,6 @@ import StatusDisplay from './components/StatusDisplay';
 import TextSection from './components/TextSection';
 import Button from './components/ui/Button';
 import Section from './components/ui/Section';
-import DataTable from './components/DataTable';
 import useOcrProcessing from './hooks/useOcrProcessing';
 
 const App: React.FC = () => {
@@ -12,8 +11,6 @@ const App: React.FC = () => {
   const {
     state: {
       extractedText,
-      jsonText,
-      structuredData,
       analysisText,
       rawOcrJson,
       showRawJson,
@@ -91,47 +88,6 @@ const App: React.FC = () => {
             </>
           }
         />
-
-        {/* JSON Data Section */}
-        <TextSection
-          title="Structured Data (JSON)"
-          value={jsonText}
-          onChange={(e) => updateState({ jsonText: e.target.value })}
-          placeholder="JSON data will appear here..."
-          isMonospace={true}
-          buttons={
-            <Button
-              onClick={handleAnalysis}
-              disabled={!jsonText || isAnalysisProcessing}
-            >
-              {isAnalysisProcessing ? 'Processing...' : 'Analyze Results'}
-            </Button>
-          }
-        />
-
-        {/* Tabular Data Section */}
-        <Section 
-          title="Tabular Data"
-          buttons={
-            <Button 
-              onClick={handleAnalysis}
-              disabled={structuredData.length === 0 || isAnalysisProcessing}
-            >
-              {isAnalysisProcessing ? 'Processing...' : 'Analyze Results'}
-            </Button>
-          }
-        >
-          <div className="table-container overflow-y-auto border border-gray-200 rounded-md bg-white">
-            {structuredData.length > 0 ? (
-              <DataTable 
-                data={structuredData} 
-                className="w-full" 
-              />
-            ) : (
-              <div className="p-4 text-gray-500 italic">No tabular data available</div>
-            )}
-          </div>
-        </Section>
 
         {/* Analysis Results Section */}
         <TextSection

@@ -63,8 +63,8 @@ export const structureTableData = async (ocrText: string): Promise<any> => {
         { 
           role: "system", 
           content: `You are an AI assistant that specializes in converting OCR'd table text into structured data.
-          Your task is to interpret the provided OCR text that originated from a table and convert it into a well-structured JSON format. Example:   {
-            "test_name": "Cortisol ochtend",
+          Your task is to interpret the provided OCR text that originated from a table and convert it into a well-structured JSON format that takes the header names from the first row of the table. Example:   {
+            "header_1": "Cortisol ochtend",
             "result_current": 16.8,
             "result_previous": 12.6,
             "reference_range_lower_value": "4.3",
