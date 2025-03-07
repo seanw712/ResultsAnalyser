@@ -4,7 +4,8 @@ export const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
   const tempCtx = tempCanvas.getContext('2d')!;
   
   // Increase resolution for better text recognition
-  const scaleFactor = 2.5; // Increased from 2.0 to 2.5 for better detail
+  // For tables, a higher resolution helps preserve structure
+  const scaleFactor = 3.0; // Increased from 2.5 to 3.0 for better detail in tables
   const width = canvas.width * scaleFactor;
   const height = canvas.height * scaleFactor;
   
@@ -38,8 +39,8 @@ export const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
       // Convert to grayscale using precise coefficients
       const gray = 0.2989 * data[i] + 0.5870 * data[i + 1] + 0.1140 * data[i + 2];
       
-      // Apply mild contrast enhancement (reduced from 1.2 to 1.1)
-      const contrast = 1.1;
+      // Apply mild contrast enhancement (reduced for better table line preservation)
+      const contrast = 1.05;
       const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
       const enhancedGray = factor * (gray - 128) + 128;
       
@@ -48,26 +49,26 @@ export const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
       let threshold;
       if (avgBrightness > 200) {
         // Bright document (white background)
-        threshold = 170; // Lower threshold to catch lighter text
+        threshold = 180; // Higher threshold to preserve table lines
       } else if (avgBrightness < 100) {
         // Dark document
         threshold = 120; // Higher threshold for dark backgrounds
       } else {
         // Normal document
-        threshold = 150; // Balanced threshold
+        threshold = 160; // Balanced threshold
       }
       
-      // Apply a more gradual thresholding for better text preservation
+      // Apply a more gradual thresholding for better text and line preservation
       let value;
-      if (enhancedGray > threshold + 30) {
+      if (enhancedGray > threshold + 40) {
         // Definitely background
         value = 255;
-      } else if (enhancedGray < threshold - 30) {
-        // Definitely text
+      } else if (enhancedGray < threshold - 40) {
+        // Definitely text or lines
         value = 0;
       } else {
         // In the middle - use a more gradual approach to preserve details
-        const normalizedGray = (enhancedGray - (threshold - 30)) / 60;
+        const normalizedGray = (enhancedGray - (threshold - 40)) / 80;
         value = Math.round(normalizedGray * 255);
       }
       
@@ -78,51 +79,118 @@ export const optimizeImageForOCR = (canvas: HTMLCanvasElement): string => {
     // Put the modified pixels back
     tempCtx.putImageData(imageData, 0, 0);
     
-    // Create a second canvas for a different processing approach
-    const secondCanvas = document.createElement('canvas');
-    secondCanvas.width = width;
-    secondCanvas.height = height;
-    const secondCtx = secondCanvas.getContext('2d')!;
+    // Create a second canvas for line detection (important for tables)
+    const lineCanvas = document.createElement('canvas');
+    lineCanvas.width = width;
+    lineCanvas.height = height;
+    const lineCtx = lineCanvas.getContext('2d')!;
     
-    // Apply a different processing technique focused on edge detection
-    secondCtx.drawImage(canvas, 0, 0, width, height);
-    const secondImageData = secondCtx.getImageData(0, 0, width, height);
-    const secondData = secondImageData.data;
+    // Draw original image
+    lineCtx.drawImage(canvas, 0, 0, width, height);
+    const lineImageData = lineCtx.getImageData(0, 0, width, height);
+    const lineData = lineImageData.data;
     
-    // Simple edge detection to highlight text boundaries
+    // Specialized processing to enhance horizontal and vertical lines (table structure)
+    // This uses a modified Hough transform approach to detect lines
+    
+    // First pass: detect horizontal lines
     for (let y = 1; y < height - 1; y++) {
+      let lineStart = -1;
+      let lineLength = 0;
+      
       for (let x = 1; x < width - 1; x++) {
         const idx = (y * width + x) * 4;
-        
-        // Get grayscale values of surrounding pixels
         const gray = 0.2989 * originalData[idx] + 0.5870 * originalData[idx + 1] + 0.1140 * originalData[idx + 2];
         
-        // Simple Sobel edge detection
-        const gx = 
-          -1 * (0.2989 * originalData[idx - 4] + 0.5870 * originalData[idx - 3] + 0.1140 * originalData[idx - 2]) +
-           1 * (0.2989 * originalData[idx + 4] + 0.5870 * originalData[idx + 5] + 0.1140 * originalData[idx + 6]);
-        
-        const gy = 
-          -1 * (0.2989 * originalData[idx - width * 4] + 0.5870 * originalData[idx - width * 4 + 1] + 0.1140 * originalData[idx - width * 4 + 2]) +
-           1 * (0.2989 * originalData[idx + width * 4] + 0.5870 * originalData[idx + width * 4 + 1] + 0.1140 * originalData[idx + width * 4 + 2]);
-        
-        // Calculate edge magnitude
-        const magnitude = Math.sqrt(gx * gx + gy * gy);
-        
-        // Highlight edges
-        if (magnitude > 20) {
-          secondData[idx] = secondData[idx + 1] = secondData[idx + 2] = 0; // Edge (black)
-        } else {
-          secondData[idx] = secondData[idx + 1] = secondData[idx + 2] = 255; // Non-edge (white)
+        // Check if this is a potential line pixel (dark)
+        if (gray < 150) {
+          if (lineStart === -1) {
+            lineStart = x;
+          }
+          lineLength++;
+        } else if (lineStart !== -1) {
+          // We've reached the end of a potential line
+          if (lineLength > width / 20) { // Only consider lines of significant length
+            // Enhance this line by making it darker and slightly thicker
+            for (let lx = lineStart; lx < lineStart + lineLength; lx++) {
+              const lineIdx = (y * width + lx) * 4;
+              lineData[lineIdx] = lineData[lineIdx + 1] = lineData[lineIdx + 2] = 0; // Make line black
+              
+              // Make line slightly thicker (1px above and below)
+              if (y > 1) {
+                const aboveIdx = ((y - 1) * width + lx) * 4;
+                lineData[aboveIdx] = lineData[aboveIdx + 1] = lineData[aboveIdx + 2] = 0;
+              }
+              if (y < height - 2) {
+                const belowIdx = ((y + 1) * width + lx) * 4;
+                lineData[belowIdx] = lineData[belowIdx + 1] = lineData[belowIdx + 2] = 0;
+              }
+            }
+          }
+          lineStart = -1;
+          lineLength = 0;
         }
       }
     }
     
-    secondCtx.putImageData(secondImageData, 0, 0);
+    // Second pass: detect vertical lines
+    for (let x = 1; x < width - 1; x++) {
+      let lineStart = -1;
+      let lineLength = 0;
+      
+      for (let y = 1; y < height - 1; y++) {
+        const idx = (y * width + x) * 4;
+        const gray = 0.2989 * originalData[idx] + 0.5870 * originalData[idx + 1] + 0.1140 * originalData[idx + 2];
+        
+        // Check if this is a potential line pixel (dark)
+        if (gray < 150) {
+          if (lineStart === -1) {
+            lineStart = y;
+          }
+          lineLength++;
+        } else if (lineStart !== -1) {
+          // We've reached the end of a potential line
+          if (lineLength > height / 20) { // Only consider lines of significant length
+            // Enhance this line by making it darker and slightly thicker
+            for (let ly = lineStart; ly < lineStart + lineLength; ly++) {
+              const lineIdx = (ly * width + x) * 4;
+              lineData[lineIdx] = lineData[lineIdx + 1] = lineData[lineIdx + 2] = 0; // Make line black
+              
+              // Make line slightly thicker (1px left and right)
+              if (x > 1) {
+                const leftIdx = (ly * width + (x - 1)) * 4;
+                lineData[leftIdx] = lineData[leftIdx + 1] = lineData[leftIdx + 2] = 0;
+              }
+              if (x < width - 2) {
+                const rightIdx = (ly * width + (x + 1)) * 4;
+                lineData[rightIdx] = lineData[rightIdx + 1] = lineData[rightIdx + 2] = 0;
+              }
+            }
+          }
+          lineStart = -1;
+          lineLength = 0;
+        }
+      }
+    }
     
-    // Return the first processed image as it tends to work better for OCR
-    // But the second approach is available if needed in the future
-    return tempCanvas.toDataURL('image/png');
+    lineCtx.putImageData(lineImageData, 0, 0);
+    
+    // Blend the two processed images (thresholded and line-enhanced)
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = width;
+    finalCanvas.height = height;
+    const finalCtx = finalCanvas.getContext('2d')!;
+    
+    // Draw the thresholded image first
+    finalCtx.drawImage(tempCanvas, 0, 0);
+    
+    // Overlay the line-enhanced image with reduced opacity
+    finalCtx.globalAlpha = 0.7;
+    finalCtx.drawImage(lineCanvas, 0, 0);
+    finalCtx.globalAlpha = 1.0;
+    
+    // Return the final processed image
+    return finalCanvas.toDataURL('image/png');
   } catch (err) {
     console.warn('Image optimization failed, proceeding with unoptimized image', err);
     // Return original image if processing fails
