@@ -1,8 +1,16 @@
 import { useState, useRef } from 'react';
-import { createWorker } from 'tesseract.js';
+import { createWorker, PSM } from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import { analyzeBloodwork, structureTableData } from '../services/openai';
-import { optimizeImageForOCR } from '../utils/imageProcessing';
+import { optimizeImageForOCR } from '../utils/imageProcessing.ts';
+
+// Add Tesseract types
+interface TesseractResult {
+  data: {
+    text: string;
+    words?: OcrWord[];
+  };
+}
 
 // Set the worker source path
 pdfjsLib.GlobalWorkerOptions.workerSrc = `${window.location.origin}/pdf.worker.min.mjs`;
@@ -21,6 +29,17 @@ export interface OcrState {
   progress: number;
   currentPage: number;
   totalPages: number;
+}
+
+// Add type for OCR word object
+interface OcrWord {
+  text: string;
+  bbox: {
+    x0: number;
+    x1: number;
+    y0: number;
+    y1: number;
+  };
 }
 
 export const useOcrProcessing = () => {
@@ -65,8 +84,8 @@ export const useOcrProcessing = () => {
     }
   };
 
-  // Replace the current transformOcrTextToTable function with this new one
-  const transformOcrWordsToTable_BBox = (words: any[]): { structuredData: string[][], htmlTable: string } => {
+  // Update the function signature with proper typing
+  const transformOcrWordsToTable_BBox = (words: OcrWord[]): { structuredData: string[][], htmlTable: string } => {
     const rowTolerance = 10; // pixels tolerance to group words into the same row
     const rows: { y: number, words: any[] }[] = [];
     
@@ -165,6 +184,13 @@ export const useOcrProcessing = () => {
       if (workerRef.current) {
         workerRef.current.setParameters({
           tessedit_ocr_engine_mode: 1, // Use LSTM only
+          tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,%%<>/-+()μ: ',
+          tessedit_pageseg_mode: PSM.AUTO, // Assume uniform text block
+          preserve_interword_spaces: '1',
+          tessedit_create_txt: '1',
+          tessedit_create_hocr: '1',
+          tessedit_enable_doc_dict: '0', // Disable dictionary to prevent unwanted corrections
+          tessedit_write_images: '1'
         });
       }
 
@@ -182,14 +208,18 @@ export const useOcrProcessing = () => {
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        const context = canvas.getContext('2d')!;
+        const context = canvas.getContext('2d');
+
+        if (!context) {
+          throw new Error('Failed to get canvas context');
+        }
 
         await page.render({ canvasContext: context, viewport }).promise;
         const imageData = optimizeImageForOCR(canvas);
 
         if (workerRef.current) {
           setProcessingStatus(`OCR Processing page ${i} of ${pdf.numPages}...`, ((i - 1) / pdf.numPages) * 100 + (50 / pdf.numPages));
-          const result = await workerRef.current.recognize(imageData);
+          const result = (await workerRef.current.recognize(imageData)) as TesseractResult;
           fullText += result.data.text + '\n';
           
           // Accumulate word data (with bounding box positions)
@@ -219,7 +249,7 @@ export const useOcrProcessing = () => {
       return { text: fullText, table: htmlTable, structuredData };
     } catch (error) {
       await cleanupWorker();
-      throw new Error('Failed to extract text from PDF');
+      throw error instanceof Error ? error : new Error('Failed to extract text from PDF');
     }
   };
 
@@ -235,7 +265,10 @@ export const useOcrProcessing = () => {
       canvas.width = image.width;
       canvas.height = image.height;
       const ctx = canvas.getContext('2d');
-      ctx?.drawImage(image, 0, 0);
+      if (!ctx) {
+        throw new Error('Failed to get canvas context');
+      }
+      ctx.drawImage(image, 0, 0);
 
       const optimizedDataUrl = optimizeImageForOCR(canvas);
 
@@ -245,9 +278,16 @@ export const useOcrProcessing = () => {
       if (workerRef.current) {
         workerRef.current.setParameters({
           tessedit_ocr_engine_mode: 1, // Use LSTM only
+          tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,%%<>/-+()μ: ',
+          tessedit_pageseg_mode: PSM.AUTO, // Assume uniform text block
+          preserve_interword_spaces: '1',
+          tessedit_create_txt: '1',
+          tessedit_create_hocr: '1',
+          tessedit_enable_doc_dict: '0', // Disable dictionary to prevent unwanted corrections
+          tessedit_write_images: '1'
         });
         setProcessingStatus('Starting OCR...', 30);
-        const result = await workerRef.current.recognize(optimizedDataUrl);
+        const result = (await workerRef.current.recognize(optimizedDataUrl)) as TesseractResult;
         setProcessingStatus('OCR completed, processing results...', 90);
 
         await cleanupWorker();
@@ -270,7 +310,7 @@ export const useOcrProcessing = () => {
       throw new Error('Failed to create worker');
     } catch (error) {
       await cleanupWorker();
-      throw new Error('Failed to extract text from image');
+      throw error instanceof Error ? error : new Error('Failed to extract text from image');
     }
   };
 
