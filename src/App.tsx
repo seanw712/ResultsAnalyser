@@ -5,7 +5,7 @@ import TextSection from './components/TextSection';
 import Button from './components/ui/Button';
 import Section from './components/ui/Section';
 import useOcrProcessing from './hooks/useOcrProcessing';
-import LabResultsTemplate, { LabResultRow } from './components/LabResultsTemplate';
+import LabResultsTemplate, { LabResultRow } from './components/LabResultsTemplate.tsx';
 
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -13,10 +13,7 @@ const App: React.FC = () => {
   const {
     state: {
       extractedText,
-      jsonText,
       analysisText,
-      rawOcrJson,
-      showRawJson,
       isOcrProcessing,
       isAnalysisProcessing,
       error,
