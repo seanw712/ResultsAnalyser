@@ -4,16 +4,16 @@ import StatusDisplay from './components/StatusDisplay';
 import TextSection from './components/TextSection';
 import Button from './components/ui/Button';
 import Section from './components/ui/Section';
-import DataTable from './components/DataTable';
 import useOcrProcessing from './hooks/useOcrProcessing';
+import LabResultsTemplate, { LabResultRow } from './components/LabResultsTemplate';
 
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
+  const [labResults, setLabResults] = useState<LabResultRow[]>([]);
   const {
     state: {
       extractedText,
       jsonText,
-      structuredData,
       analysisText,
       rawOcrJson,
       showRawJson,
@@ -40,10 +40,27 @@ const App: React.FC = () => {
     }
   };
 
-  const handleProcess = async () => {
-    if (file) {
-      await handleOcr(file);
-    }
+  const populateLabResultsTemplate = () => {
+    setLabResults([
+      {
+        testName: '',
+        result: '',
+        previousResult: '',
+        referenceLower: '',
+        referenceUpper: '',
+        unit: '',
+        comments: ''
+      },
+      {
+        testName: '',
+        result: '',
+        previousResult: '',
+        referenceLower: '',
+        referenceUpper: '',
+        unit: '',
+        comments: ''
+      }
+    ]);
   };
 
   return (
@@ -53,7 +70,7 @@ const App: React.FC = () => {
         <Section title="Upload Lab Results">
           <FileUpload
             onFileChange={handleFileChange}
-            onProcess={handleProcess}
+            onProcess={() => file && handleOcr(file)}
             isProcessing={isOcrProcessing}
             onCancel={cancelProcessing}
             file={file}
@@ -70,68 +87,30 @@ const App: React.FC = () => {
         {/* OCR Text Section */}
         <TextSection
           title="Extracted Text (OCR)"
-          value={showRawJson ? rawOcrJson : extractedText}
+          value={extractedText}
           onChange={(e) => updateState({ extractedText: e.target.value })}
           placeholder="OCR results will appear here..."
           buttons={
-            <>
-              {rawOcrJson && (
-                <Button
-                  onClick={() => updateState({ showRawJson: !showRawJson })}
-                >
-                  {showRawJson ? 'Show Formatted Text' : 'Show Raw JSON'}
-                </Button>
-              )}
-              <Button
-                onClick={handleAnalysis}
-                disabled={!extractedText || isAnalysisProcessing}
-              >
-                {isAnalysisProcessing ? 'Processing...' : 'Analyze Results'}
-              </Button>
-            </>
-          }
-        />
-
-        {/* JSON Data Section */}
-        <TextSection
-          title="Structured Data (JSON)"
-          value={jsonText}
-          onChange={(e) => updateState({ jsonText: e.target.value })}
-          placeholder="JSON data will appear here..."
-          isMonospace={true}
-          buttons={
             <Button
-              onClick={handleAnalysis}
-              disabled={!jsonText || isAnalysisProcessing}
+              onClick={populateLabResultsTemplate}
+              disabled={!extractedText}
             >
-              {isAnalysisProcessing ? 'Processing...' : 'Analyze Results'}
+              Fill Template
             </Button>
           }
         />
 
-        {/* Tabular Data Section */}
-        <Section 
-          title="Tabular Data"
-          buttons={
-            <Button 
-              onClick={handleAnalysis}
-              disabled={structuredData.length === 0 || isAnalysisProcessing}
-            >
-              {isAnalysisProcessing ? 'Processing...' : 'Analyze Results'}
-            </Button>
-          }
-        >
-          <div className="table-container overflow-y-auto border border-gray-200 rounded-md bg-white">
-            {structuredData.length > 0 ? (
-              <DataTable 
-                data={structuredData} 
-                className="w-full" 
-              />
-            ) : (
-              <div className="p-4 text-gray-500 italic">No tabular data available</div>
-            )}
-          </div>
-        </Section>
+        {/* Lab Results Template Section */}
+        <LabResultsTemplate
+          data={labResults}
+          onDataChange={setLabResults}
+          onAnalyze={() => {
+            const jsonData = JSON.stringify(labResults, null, 2);
+            updateState({ jsonText: jsonData });
+            handleAnalysis();
+          }}
+          isProcessing={isAnalysisProcessing}
+        />
 
         {/* Analysis Results Section */}
         <TextSection

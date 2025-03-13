@@ -49,34 +49,52 @@ export const formatLabResults = (text: string): string => {
     formattedText += 'Testen                 Resultaten       Vorige resultaten   Onderl.   Bovenl.   Eenheden\n';
     formattedText += '---------------------------------------------------------------------------------------\n';
     
-    // Extract dates from the table header section
-    const tableHeaderLines = cleanedText.split('\n').filter(line => 
-      line.match(/Testen|Resultaten|Vorige|Onderl|Bovenl|Eenheden/i)
+    // Check for single-line header or multi-line headers
+    const lines = cleanedText.split('\n');
+    const singleLineHeaderIndex = lines.findIndex(line => 
+      line.match(/Testen.*Resultaten.*Vorige.*resultaten.*Onderl.*Bovenl.*Eenheden/i)
     );
     
-    // Look for date lines that typically appear after the table header
+    // If no single-line header found, check for headers on separate lines
+    const testenIndex = singleLineHeaderIndex === -1 ? 
+      lines.findIndex(line => line.match(/^\s*Testen\s*$/i)) : -1;
+    const resultatenIndex = singleLineHeaderIndex === -1 ? 
+      lines.findIndex(line => line.match(/^\s*Resultaten\s*$/i)) : -1;
+    
+    // Determine which header pattern we found
+    const headerFound = singleLineHeaderIndex !== -1 || (testenIndex !== -1 && resultatenIndex !== -1);
+    let headerLineIndex = singleLineHeaderIndex !== -1 ? singleLineHeaderIndex : 
+                         (testenIndex !== -1 ? testenIndex : -1);
+    
+    // Extract dates from the table header section or nearby
     const dateLines = [];
     const dateRegex = /^\s*(\d{1,2}\/\d{1,2}\/\d{2,4})\s*$/;
     
-    // Find the line with the table header
-    const headerLineIndex = cleanedText.split('\n').findIndex(line => 
-      line.match(/Testen|Resultaten|Vorige|Onderl|Bovenl|Eenheden/i)
-    );
-    
-    // Look for dates in the lines after the header
-    if (headerLineIndex !== -1) {
-      const lines = cleanedText.split('\n');
-      for (let i = headerLineIndex + 1; i < headerLineIndex + 5 && i < lines.length; i++) {
-        const dateMatch = lines[i].match(dateRegex);
-        if (dateMatch) {
-          dateLines.push(dateMatch[1].trim());
+    // Look for dates in the appropriate area based on which header pattern we found
+    if (headerFound) {
+      // For single-line headers, look after the header
+      if (singleLineHeaderIndex !== -1) {
+        for (let i = singleLineHeaderIndex + 1; i < singleLineHeaderIndex + 5 && i < lines.length; i++) {
+          const dateMatch = lines[i].match(dateRegex);
+          if (dateMatch) {
+            dateLines.push(dateMatch[1].trim());
+          }
+        }
+      } 
+      // For multi-line headers, look after the "Resultaten" line
+      else if (resultatenIndex !== -1) {
+        for (let i = resultatenIndex + 1; i < resultatenIndex + 5 && i < lines.length; i++) {
+          const dateMatch = lines[i].match(dateRegex);
+          if (dateMatch) {
+            dateLines.push(dateMatch[1].trim());
+          }
         }
       }
     }
     
-    // If we couldn't find dates after the header, look for them anywhere in the text
+    // If we couldn't find dates near the headers, look for them anywhere in the text
     if (dateLines.length === 0) {
-      cleanedText.split('\n').forEach(line => {
+      lines.forEach(line => {
         const dateMatch = line.match(dateRegex);
         if (dateMatch) {
           dateLines.push(dateMatch[1].trim());
@@ -89,8 +107,12 @@ export const formatLabResults = (text: string): string => {
     
     formattedText += `${currentDate}               ${previousDate}\n\n`;
     
-    // Process the test sections
-    const sections = extractTestSections(cleanedText);
+    // Process the test sections - pass the header pattern information
+    const sections = extractTestSections(cleanedText, {
+      singleLineHeader: singleLineHeaderIndex !== -1,
+      testenIndex: testenIndex,
+      resultatenIndex: resultatenIndex
+    });
     
     // Format each section
     sections.forEach(section => {
@@ -121,7 +143,11 @@ export const formatLabResults = (text: string): string => {
 /**
  * Extract test sections from OCR text
  */
-const extractTestSections = (text: string): LabSection[] => {
+const extractTestSections = (text: string, headerInfo?: {
+  singleLineHeader: boolean,
+  testenIndex: number,
+  resultatenIndex: number
+}): LabSection[] => {
   const sections: LabSection[] = [];
   let currentSection: LabSection | null = null;
   
@@ -138,8 +164,19 @@ const extractTestSections = (text: string): LabSection[] => {
     // Skip lines that are likely dates
     if (line.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/)) continue;
     
-    // Skip lines that are likely table headers
-    if (line.match(/Testen|Resultaten|Vorige|Onderl|Bovenl|Eenheden/i)) continue;
+    // Check how to handle header lines based on the pattern we found
+    if (headerInfo) {
+      if (headerInfo.singleLineHeader) {
+        // Skip lines that are likely table headers (single line pattern)
+        if (line.match(/Testen|Resultaten|Vorige|Onderl|Bovenl|Eenheden/i)) continue;
+      } else {
+        // Skip individual header lines (multi-line pattern)
+        if (line.match(/^\s*Testen\s*$/i) || line.match(/^\s*Resultaten\s*$/i)) continue;
+      }
+    } else {
+      // Fallback to original behavior if no header info provided
+      if (line.match(/Testen|Resultaten|Vorige|Onderl|Bovenl|Eenheden/i)) continue;
+    }
     
     // Check if this is a section header (all caps, no numbers)
     if (line.match(/^[A-ZÄËÏÖÜÁÉÍÓÚÀÈÌÒÙ\s]+$/) && !line.match(/^\d/) && line.length > 3) {
@@ -209,7 +246,48 @@ const extractTestSections = (text: string): LabSection[] => {
     }
   }
   
-  // If no sections were found, try to create a default section
+  // For multi-line header pattern, we need a special approach if no sections were found
+  if (sections.length === 0 && headerInfo && !headerInfo.singleLineHeader && 
+      headerInfo.testenIndex !== -1 && headerInfo.resultatenIndex !== -1) {
+    
+    // Create a default section
+    const defaultSection: LabSection = {
+      name: "TESTS",
+      tests: []
+    };
+    
+    // Look for lines between "Testen" and "Resultaten" as test names
+    const startIndex = headerInfo.testenIndex + 1;
+    const endIndex = headerInfo.resultatenIndex;
+    
+    for (let i = startIndex; i < endIndex; i++) {
+      const testName = lines[i].trim();
+      if (testName && !testName.match(/^[A-ZÄËÏÖÜÁÉÍÓÚÀÈÌÒÙ\s]+$/) && testName.length > 1) {
+        // Now we need to find the corresponding results
+        // Look for lines after "Resultaten" that contain numeric values
+        for (let j = headerInfo.resultatenIndex + 1; j < lines.length; j++) {
+          const resultLine = lines[j].trim();
+          if (resultLine && resultLine.match(/\d/)) {
+            defaultSection.tests.push({
+              name: testName,
+              result: resultLine,
+              previousResult: '',
+              lowerLimit: '',
+              upperLimit: '',
+              unit: ''
+            });
+            break;
+          }
+        }
+      }
+    }
+    
+    if (defaultSection.tests.length > 0) {
+      sections.push(defaultSection);
+    }
+  }
+  
+  // If still no sections were found, try to create a default section (same as original code)
   if (sections.length === 0) {
     // Look for lines that might contain test results
     const testLines = lines.filter(line => 

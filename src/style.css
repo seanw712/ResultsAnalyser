@@ -26,7 +26,7 @@ body {
 
 /* Ensure consistent section sizing */
 .section {
-  width: 700px;
+  width: 4000px;
   margin-bottom: 20px;
   background: white;
   border-radius: 0.5rem;
@@ -38,7 +38,7 @@ body {
 textarea {
   min-height: 840px !important;
   height: 840px !important;
-  width: 700px !important;
+  width: 3000px !important;
   box-sizing: border-box !important;
 }
 
@@ -52,7 +52,7 @@ textarea.analysis-textarea {
 .table-container {
   min-height: 840px !important;
   height: 840px !important;
-  width: 700px !important;
+  width: 4000px !important;
   box-sizing: border-box !important;
 }
 

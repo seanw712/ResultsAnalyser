@@ -184,7 +184,7 @@ export const useOcrProcessing = () => {
       if (workerRef.current) {
         workerRef.current.setParameters({
           tessedit_ocr_engine_mode: 1, // Use LSTM only
-          tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,%%<>/-+()μ: ',
+          tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,%<>/-+()μ:',
           tessedit_pageseg_mode: PSM.AUTO, // Assume uniform text block
           preserve_interword_spaces: '1',
           tessedit_create_txt: '1',
@@ -277,7 +277,7 @@ export const useOcrProcessing = () => {
 
       if (workerRef.current) {
         workerRef.current.setParameters({
-          tessedit_ocr_engine_mode: 1, // Use LSTM only
+          tessedit_ocr_engine_mode: 2, // Use LSTM only
           tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,%%<>/-+()μ: ',
           tessedit_pageseg_mode: PSM.AUTO, // Assume uniform text block
           preserve_interword_spaces: '1',
